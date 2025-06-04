@@ -9,18 +9,10 @@ import {
   RangeValue,
   SimilarQuestionType,
 } from '../../common/type';
-import { createContext, useEffect, useRef, useState, ReactNode } from 'react';
-import { chatExecute,
-  dataInterpret, 
-  chatParse, 
-  queryData, 
-  deleteQuery, 
-  switchEntity, 
-  queryThoughtsInSSE, 
-  deepSeekStream } from '../../service';
+import { createContext, useEffect, useRef, useState } from 'react';
+import { chatExecute, chatParse, queryData, deleteQuery, switchEntity } from '../../service';
 import { PARSE_ERROR_TIP, PREFIX_CLS, SEARCH_EXCEPTION_TIP } from '../../common/constants';
 import { message, Spin } from 'antd';
-import { CheckCircleFilled, CaretDownOutlined, CaretRightOutlined } from '@ant-design/icons';
 import IconFont from '../IconFont';
 import ExpandParseTip from './ExpandParseTip';
 import ParseTip from './ParseTip';
@@ -30,21 +22,12 @@ import classNames from 'classnames';
 import Tools from '../Tools';
 import SqlItem from './SqlItem';
 import SimilarQuestionItem from './SimilarQuestionItem';
-import { AgentType, DeepSeekStreamParams, FileResultsType } from '../../Chat/type';
+import { AgentType } from '../../Chat/type';
 import dayjs, { Dayjs } from 'dayjs';
 import { exportCsvFile } from '../../utils/utils';
-import Loading from './Loading';
 import { useMethodRegister } from '../../hooks';
-import ReactMarkdown from 'react-markdown';
-import remarkBreaks from 'remark-breaks';
-import remarkGfm from 'remark-gfm';
-import rehypeKatex from 'rehype-katex';
-import rehypeRaw from'rehype-raw';
-import rehypeHighlight from 'rehype-highlight';
-import 'highlight.js/styles/github.css'; // 浅灰色背景主题
 
 type Props = {
-  msgId?: string | number;
   msg: string;
   conversationId?: number;
   questionId?: number;
@@ -67,9 +50,6 @@ type Props = {
   onMsgDataLoaded?: (data: MsgDataType, valid: boolean, isRefresh?: boolean) => void;
   onUpdateMessageScroll?: () => void;
   onSendMsg?: (msg: string) => void;
-  onCouldNotAnswer?: () => void;
-  fileResultsForReqStream?: FileResultsType;
-  changeInStreamQuery?: (params: DeepSeekStreamParams|undefined) => void;
 };
 
 export const ChartItemContext = createContext({
@@ -78,7 +58,6 @@ export const ChartItemContext = createContext({
 });
 
 const ChatItem: React.FC<Props> = ({
-  msgId = '',
   msg,
   conversationId,
   questionId,
@@ -100,14 +79,9 @@ const ChatItem: React.FC<Props> = ({
   isLastMessage,
   onMsgDataLoaded,
   onUpdateMessageScroll,
-  onCouldNotAnswer = () => {},
-  fileResultsForReqStream,
-  changeInStreamQuery = () => {},
+  onSendMsg,
 }) => {
   const [parseLoading, setParseLoading] = useState(false);
-  const [isThinking, setIsThinking] = useState(false);
-  const [isDataInterpret, setIsDataInterpret] = useState(false);
-  const [isStreamResult, setIsStreamResult] = useState(false);
   const [parseTimeCost, setParseTimeCost] = useState<ParseTimeCostType>();
   const [parseInfo, setParseInfo] = useState<ChatContextType>();
   const [parseInfoOptions, setParseInfoOptions] = useState<ChatContextType[]>([]);
@@ -128,16 +102,6 @@ const ChatItem: React.FC<Props> = ({
     {}
   );
   const [isParserError, setIsParseError] = useState<boolean>(false);
-  const [isGoRefresh , setIsGoRefresh] = useState<boolean>(false);
-  const [thinkingContent, setThinkingContent] = useState<string>('');
-  const [streamResultContent, setStreamResultContent] = useState<string>('');
-  const [reasonTextContent, setReasonTextContent] = useState<string>('');
-  const [answerTextContent, setanswerTextContent] = useState<string>('');
-  const isThinkingRef = useRef(isThinking);
-  const isStreamResultRef = useRef(isStreamResult);
-  const [thinkingTimeInSeconds, setThinkingTimeInSeconds] = useState<string>('0');
-  const [toggleOfThouths, setToggleOfThouths] = useState<boolean>(false);
-  const [isThinkingOfdeepSeekStream, setIsThinkingOfdeepSeekStream] = useState<boolean>(false);
   const resetState = () => {
     setParseLoading(false);
     setParseTimeCost(undefined);
@@ -158,21 +122,6 @@ const ChatItem: React.FC<Props> = ({
   };
 
   const prefixCls = `${PREFIX_CLS}-item`;
-
-  const getNodeTip = (title: ReactNode, tip?: string | ReactNode) => {
-    return (
-        <>
-          <div className={`${prefixCls}-title-bar`}>
-            <CheckCircleFilled className={`${prefixCls}-step-icon`} />
-            <div className={`${prefixCls}-step-title`}>
-              {title}
-              {!tip && <Loading />}
-            </div>
-          </div>
-          {tip && <div className={`${prefixCls}-content-container`}>{tip}</div>}
-        </>
-    );
-  };
 
   const updateData = (res: Result<MsgDataType>) => {
     let tip: string = '';
@@ -211,164 +160,35 @@ const ChatItem: React.FC<Props> = ({
     parseInfoValue: ChatContextType,
     parseInfos?: ChatContextType[],
     isSwitchParseInfo?: boolean,
-    isRefresh = false,
-    fileResultsForReqStream?: FileResultsType
+    isRefresh = false
   ) => {
+    setExecuteMode(true);
+    if (isSwitchParseInfo) {
+      setEntitySwitchLoading(true);
+    } else {
+      setExecuteLoading(true);
+    }
     try {
-      if (currentAgent?.chatAppConfig?.SMALL_TALK?.enable) {
-        let reasonTextContent = ''
-        let answerTextContent = ''
-        let textContent = ''
-        let endFlag = false
-        setIsThinkingOfdeepSeekStream(true)
-        let timer = setInterval(() => {
-          setThinkingTimeInSeconds((prev)=>{
-            return (+prev + 0.1).toFixed(1)
-          })
-        }, 100)
-        const messageFunc = (event) => {
-          if(JSON.parse(event.data)?.type === 'reason'){
-            reasonTextContent += JSON.parse(event.data)?.message
-          }else if(JSON.parse(event.data)?.type === 'answer') {
-            setIsThinkingOfdeepSeekStream(false)
-            clearInterval(timer)
-            answerTextContent += JSON.parse(event.data)?.message
-          }else if(JSON.parse(event.data)?.type === 'endFlag') {
-            endFlag = true
-            changeInStreamQuery(undefined)
-          }
-          textContent += JSON.parse(event.data)?.message
-          setStreamResultContent('' + textContent)
-          setReasonTextContent('' + reasonTextContent)
-          setanswerTextContent('' + answerTextContent)
-        }
-        const errorFunc = (error) => {
-          setIsThinkingOfdeepSeekStream(false)
-          clearInterval(timer)
-          setIsStreamResult(false)
-          console.error('(result)SSE 错误:', error);
-          if (!endFlag) {
-            changeInStreamQuery(undefined)
-          }
-          // throw error
-        };
-        const closeFunc = () => {
-          setIsThinkingOfdeepSeekStream(false)
-          clearInterval(timer)
-          setIsStreamResult(false)
-          console.log('(result)SSE 连接已关闭');
-          if (!endFlag) {
-            changeInStreamQuery(undefined)
-          }
-        };
-        setIsStreamResult(true)
-        deepSeekStream (
-          {
-            queryText: msg,
-            chatId: conversationId!,
-            parseInfo: parseInfoValue,
-            agentId: agentId,
-            fileResultsForReqStream
-          },
-          messageFunc,errorFunc,closeFunc
-        )
-        changeInStreamQuery({
-          queryText: msg,
-          chatId: conversationId!,
-          parseInfo: parseInfoValue,
-          agentId: agentId,
-          fileResultsForReqStream
-        })
-      } else {
-        setExecuteMode(true);
-        if (isSwitchParseInfo) {
-          setEntitySwitchLoading(true);
-        } else {
-          setExecuteLoading(true);
-        }
-        const res: any = await chatExecute(msg, conversationId!, parseInfoValue, agentId);
-        if(res.data.queryResults?.length === 1 && res.data.resultType){
-          setDimensionFilters(filters => {
-            const newFilters = filters.map(item => {  
-              const nameEn = res.data.queryColumns?.find((queryColumnsItem:{ name: string; nameEn: string }) => {
-                return queryColumnsItem.name === item.name
-              })?.nameEn
-              if(nameEn){
-                item.value = res.data.queryResults[0][nameEn];
-              }
-              return item;
-            })
-            return newFilters;
-          })
-          // 通知ParseTip触发onRefresh
-          setIsGoRefresh(true)
-        }
-        const valid = updateData(res);
-        onMsgDataLoaded?.(
-          {
-            ...res.data,
-            parseInfos,
-            queryId: parseInfoValue.queryId,
-          },
-          valid,
-          isRefresh
-        );
-        // 没有回答上会显示一遍推荐问题
-        if(res?.data?.chatContext?.sqlInfo?.resultType === 'text'
-            || !(res?.data?.queryResults)
-            || res?.data?.queryResults?.length === 0
-        ) {
-          onCouldNotAnswer()
-        }
-      // 如果开启了数据解读功能（且没开启闲聊的情况下），会调用数据解释接口，获取数据解释结果
-      if (currentAgent?.chatAppConfig?.DATA_INTERPRETER?.enable && !currentAgent?.chatAppConfig?.SMALL_TALK?.enable) {
-        setIsDataInterpret(true);
-        setTimeout(async()=>{
-          try{
-            const resOfSummary:any = await dataInterpret(res?.data?.textResult || '' ,msg, conversationId!, parseInfoValue, agentId)
-            if(res?.data){
-              res.data.textSummary = resOfSummary?.data?.textSummary
-            }
-            onMsgDataLoaded?.(
-              {
-                ...res.data,
-                parseInfos,
-                queryId: parseInfoValue.queryId,
-              },
-              valid,
-              isRefresh
-            );
-            onUpdateMessageScroll?.()
-            // 这里需要再执行一遍显示推荐问题，不然推荐问题会消失
-            if(res?.data?.chatContext?.sqlInfo?.resultType === 'text' 
-              || !(res?.data?.queryResults)
-              || res?.data?.queryResults?.length === 0
-            ) {
-              onCouldNotAnswer()
-            }
-          } catch(err) {
-
-          } finally {
-            setIsDataInterpret(false)
-          }
-        },0)
-      }
-        if (isSwitchParseInfo) {
-          setEntitySwitchLoading(false);
-        } else {
-          setExecuteLoading(false);
-        }
-      }
+      const res: any = await chatExecute(msg, conversationId!, parseInfoValue, agentId);
+      const valid = updateData(res);
+      onMsgDataLoaded?.(
+        {
+          ...res.data,
+          parseInfos,
+          queryId: parseInfoValue.queryId,
+        },
+        valid,
+        isRefresh
+      );
     } catch (e) {
-      onCouldNotAnswer()
       const tip = SEARCH_EXCEPTION_TIP;
       setExecuteTip(SEARCH_EXCEPTION_TIP);
       setDataCache({ ...dataCache, [parseInfoValue!.id!]: { tip } });
-      if (isSwitchParseInfo) {
-        setEntitySwitchLoading(false);
-      } else {
-        setExecuteLoading(false);
-      }
+    }
+    if (isSwitchParseInfo) {
+      setEntitySwitchLoading(false);
+    } else {
+      setExecuteLoading(false);
     }
   };
 
@@ -387,67 +207,14 @@ const ChatItem: React.FC<Props> = ({
   };
 
   const sendMsg = async () => {
-    const responseDiv = document.getElementById('thoughts-response-'+msgId)
-    if (responseDiv && !currentAgent?.chatAppConfig?.SMALL_TALK?.enable) {
-      responseDiv.textContent = ''
-      let time = 0;
-      const messageFunc = (event) => {
-        setTimeout(() => {
-          responseDiv.textContent += event.data
-          setThinkingContent('' + responseDiv.textContent)
-          responseDiv.scrollTop = responseDiv.scrollHeight;
-        },time)
-        time += 50
-      }
-      const errorFunc = (error) => {
-        setIsThinking(false)
-        console.error('SSE 错误:', error);
-        // throw error
-      };
-      const closeFunc = () => {
-        setTimeout(() => {
-          setIsThinking(false)
-        },time)
-        console.log('SSE 连接已关闭');
-      };
-      setIsThinking(true)
-      queryThoughtsInSSE(msg,conversationId,agentId,messageFunc,errorFunc,closeFunc)
-    }
     setParseLoading(true);
-    let parseData: any = {};
-    try {
-      parseData = await chatParse({
-        queryText: msg,
-        chatId: conversationId,
-        modelId,
-        agentId,
-        filters: filter,
-      });
-      if(!(parseData?.data?.state === 'COMPLETED')) {
-        onCouldNotAnswer()
-      }
-    } catch (error) {
-      onCouldNotAnswer()
-      return
-    }
-    // 预设问题如果包含该提问，让其结果在思考后才出结果
-    if (currentAgent?.examples.includes(msg)) {
-      await new Promise(resolve => {
-        let step = 0
-        let timer = setInterval(() => {
-          step ++
-          if (!isThinkingRef.current) {
-            resolve(true)
-            clearInterval(timer)
-          } else {
-            if (step >= 50) {
-              resolve(true)
-              clearInterval(timer)
-            }
-          }
-        }, 200)
-      });
-    }
+    const parseData: any = await chatParse({
+      queryText: msg,
+      chatId: conversationId,
+      modelId,
+      agentId,
+      filters: filter,
+    });
     setParseLoading(false);
     const { code, data } = parseData || {};
     const { state, selectedParses, candidateParses, queryId, parseTimeCost, errorMsg } = data || {};
@@ -459,6 +226,7 @@ const ChatItem: React.FC<Props> = ({
       (!parses[0]?.properties?.type && !parses[0]?.queryMode)
     ) {
       setParseTip(state === ParseStateEnum.FAILED && errorMsg ? errorMsg : PARSE_ERROR_TIP);
+
       setParseInfo({ queryId } as any);
       return;
     }
@@ -482,7 +250,7 @@ const ChatItem: React.FC<Props> = ({
     updateDimensionFitlers(parseInfoValue?.dimensionFilters || []);
     setDateInfo(parseInfoValue?.dateInfo);
     if (parseInfos.length === 1) {
-      onExecute(parseInfoValue, parseInfos, undefined, undefined, fileResultsForReqStream);
+      onExecute(parseInfoValue, parseInfos);
     }
   };
 
@@ -511,14 +279,6 @@ const ChatItem: React.FC<Props> = ({
     }
     initChatItem(msg, msgData);
   }, [msg, msgData]);
-
-  useEffect(() => {
-    isThinkingRef.current = isThinking;
-  }, [isThinking]);
-
-  useEffect(() => {
-    isStreamResultRef.current = isStreamResult;
-  }, [isStreamResult]);
 
   const onSwitchEntity = async (entityId: string) => {
     setEntitySwitchLoading(true);
@@ -669,7 +429,7 @@ const ChatItem: React.FC<Props> = ({
   };
 
   const onSelectQuestion = (question: SimilarQuestionType) => {
-    // onSendMsg?.(question.queryText);
+    onSendMsg?.(question.queryText);
   };
 
   const contentClass = classNames(`${prefixCls}-content`, {
@@ -680,6 +440,8 @@ const ChatItem: React.FC<Props> = ({
 
   const { register, call } = useMethodRegister(() => message.error('该条消息暂不支持该操作'));
 
+  let actualQueryText=parseInfo?.properties?.CONTEXT?.queryText //  2025-05-27 增加判空，防止出现上下文没有 queryText 的情况
+  actualQueryText=actualQueryText==null?msg:actualQueryText
   return (
     <ChartItemContext.Provider value={{ register, call }}>
       <div className={prefixCls}>
@@ -711,25 +473,8 @@ const ChatItem: React.FC<Props> = ({
                 </div>
               )}
 
-              {isThinking ? getNodeTip('深度思考中') :
-                  thinkingContent ?
-                  <div className={`${prefixCls}-parse-tip`}>
-                    <div className={`${prefixCls}-title-bar`}>
-                      <CheckCircleFilled className={`${prefixCls}-step-icon`} />
-                      <div className={`${prefixCls}-step-title`}>
-                        思考过程
-                      </div>
-                    </div>
-                  </div> : ''
-              }
-              <div className={`${prefixCls}-content-container`} style={{ display: thinkingContent ? 'block' : 'none' }}>
-                <div id={'thoughts-response-' + msgId} className='thoughts-container'></div>
-              </div>
-
               {!preParseMode && (
                 <ParseTip
-                  isGoRefresh={isGoRefresh}
-                  setIsGoRefresh={setIsGoRefresh}
                   isSimpleMode={isSimpleMode}
                   parseLoading={parseLoading}
                   parseInfoOptions={parseInfoOptions}
@@ -754,52 +499,6 @@ const ChatItem: React.FC<Props> = ({
               )}
             </>
 
-            {isStreamResult ? getNodeTip('问答查询中') :
-              streamResultContent ?
-              <div className={`${prefixCls}-parse-tip`}>
-                <div className={`${prefixCls}-title-bar`}>
-                  <CheckCircleFilled className={`${prefixCls}-step-icon`} />
-                  <div className={`${prefixCls}-step-title`}>
-                    问答查询
-                  </div>
-                </div>
-              </div> : ''
-            }
-            <div className={`${prefixCls}-content-container`} style={{ display: streamResultContent ? 'block' : 'none' }}>
-              <div className='toggle-content' onClick={()=>{
-                setToggleOfThouths((prev) => { return !prev})
-              }}>
-                {isThinkingOfdeepSeekStream ? `深度思考中...(${thinkingTimeInSeconds}秒)` : `已深度思考（用时 ${thinkingTimeInSeconds} 秒）`}  
-                <div className='toggle-content-icon'>
-                 { toggleOfThouths ? <CaretRightOutlined /> : <CaretDownOutlined />} 
-                </div>
-              </div>
-              {!toggleOfThouths ? <div className='result-container  thoughts-container'>
-                { reasonTextContent }
-              </div>: ''}
-              <div className='result-container'>
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm,remarkBreaks]}
-                  rehypePlugins={[rehypeKatex, rehypeRaw, rehypeHighlight]}
-                  components={{
-                    code: ({ className, children }) => {
-                      const language = className?.replace('hljs language-', '') || 'text';
-                      return (
-                        <div className="code-block">
-                          <div className="code-language">{language}</div>
-                          <pre className={className}>
-                            <code>{children}</code>
-                          </pre>
-                        </div>
-                      )
-                    }
-                  }}
-                >
-                  { answerTextContent }
-                </ReactMarkdown>
-              </div>
-            </div>
-
             {executeMode && (
               <Spin spinning={entitySwitchLoading}>
                 <div style={{ minHeight: 50 }}>
@@ -811,7 +510,7 @@ const ChatItem: React.FC<Props> = ({
                       <SqlItem
                         agentId={agentId}
                         queryId={parseInfo.queryId}
-                        question={msg}
+                        question={actualQueryText}
                         llmReq={llmReq}
                         llmResp={llmResp}
                         integrateSystem={integrateSystem}
@@ -821,11 +520,10 @@ const ChatItem: React.FC<Props> = ({
                         executeErrorMsg={executeErrorMsg}
                       />
                     )}
-                  
                   <ExecuteItem
                     isSimpleMode={isSimpleMode}
                     queryId={parseInfo?.queryId}
-                    question={msg}
+                    question={actualQueryText}
                     queryMode={parseInfo?.queryMode}
                     executeLoading={executeLoading}
                     executeTip={executeTip}
@@ -836,25 +534,10 @@ const ChatItem: React.FC<Props> = ({
                     executeItemNode={executeItemNode}
                     isDeveloper={isDeveloper}
                     renderCustomExecuteNode={renderCustomExecuteNode}
-                    isDataInterpret={isDataInterpret}
                   />
                 </div>
               </Spin>
             )}
-            {isDataInterpret ? getNodeTip('智能洞察中') :
-              data?.textSummary && (<div className={`${prefixCls}-parse-tip`}>
-                <div className={`${prefixCls}-title-bar`}>
-                  <CheckCircleFilled className={`${prefixCls}-step-icon`} />
-                  <div className={`${prefixCls}-step-title`}>
-                    智能洞察
-                  </div>
-                </div>
-              </div>)
-            }
-            <div className={`${prefixCls}-content-container`} style={{ display: data?.textSummary ? 'block' : 'none' }}>
-              {data?.textSummary}
-            </div>
-            
             {executeMode &&
               !executeLoading &&
               !isSimpleMode &&
