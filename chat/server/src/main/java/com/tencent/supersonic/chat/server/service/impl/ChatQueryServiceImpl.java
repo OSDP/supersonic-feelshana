@@ -36,10 +36,7 @@ import com.tencent.supersonic.common.pojo.enums.Text2SQLType;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.util.DateUtils;
 import com.tencent.supersonic.common.util.JsonUtil;
-import com.tencent.supersonic.headless.api.pojo.DataSetSchema;
-import com.tencent.supersonic.headless.api.pojo.SchemaElement;
-import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
-import com.tencent.supersonic.headless.api.pojo.SqlInfo;
+import com.tencent.supersonic.headless.api.pojo.*;
 import com.tencent.supersonic.headless.api.pojo.request.DimensionValueReq;
 import com.tencent.supersonic.headless.api.pojo.request.QueryFilter;
 import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
@@ -52,8 +49,10 @@ import com.tencent.supersonic.headless.chat.query.QueryManager;
 import com.tencent.supersonic.headless.chat.query.SemanticQuery;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMReq;
 import com.tencent.supersonic.headless.chat.query.llm.s2sql.LLMSqlQuery;
+import com.tencent.supersonic.headless.chat.service.RecommendedQuestionsService;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
 import com.tencent.supersonic.headless.server.facade.service.SemanticLayerService;
+import com.tencent.supersonic.headless.server.service.DataSetService;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.service.TokenStream;
 import lombok.extern.slf4j.Slf4j;
@@ -97,6 +96,8 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     private HistoryService historyService;
     @Autowired
     private VoiceService voiceService;
+    @Autowired
+    private DataSetService dataSetService;
 
     private final List<ChatQueryParser> chatQueryParsers = ComponentFactory.getChatParsers();
     private final List<ChatQueryExecutor> chatQueryExecutors = ComponentFactory.getChatExecutors();
@@ -1081,6 +1082,26 @@ public class ChatQueryServiceImpl implements ChatQueryService {
 
     public void deleteChatQuery(Long queryId) {
         chatManageService.deleteQuery(queryId);
+    }
+    @Autowired
+    private RecommendedQuestionsService recommendedQuestionsService;
+    @Override
+    public List<DataSetResp> getDataSetRecordList(Integer agentId,  User user) {
+        Agent agent = agentService.getAgent(agentId);
+        Set<Long> dataSetIds = agent.getDataSetIds();
+        List<Long> longs = new ArrayList<>(dataSetIds);
+        MetaFilter metaFilter = new MetaFilter();
+        metaFilter.setIds(longs);
+        List<DataSetResp> dataSetsByAuth = dataSetService.getDataSetsByAuth(user, metaFilter);
+        for (DataSetResp dataSetResp : dataSetsByAuth) {
+            List<String> questions = recommendedQuestionsService.findQuestionByDataSetId(dataSetResp.getId());
+            List<DimensionResp> dataSetDimensionRecord = dataSetService.getDataSetDimensionRecord(dataSetResp);
+            List<MetricResp> dataSetMetricRecord = dataSetService.getDataSetMetricRecord(dataSetResp);
+            dataSetResp.setExamples(questions);
+            dataSetResp.setDataSetDimensionRecord(dataSetDimensionRecord);
+            dataSetResp.setDataSetMetricRecord(dataSetMetricRecord);
+        }
+        return dataSetsByAuth;
     }
 
 }

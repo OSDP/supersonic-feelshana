@@ -10,6 +10,7 @@ import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.common.pojo.exception.InvalidArgumentException;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.request.DimensionValueReq;
+import com.tencent.supersonic.headless.api.pojo.response.DataSetResp;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -18,6 +19,8 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.util.List;
 
 
 /**
@@ -102,5 +105,11 @@ public class ChatQueryController {
             HttpServletRequest request, HttpServletResponse response) {
         chatParseReq.setUser(UserHolder.findUser(request, response));
         return chatQueryService.streamParse(chatParseReq);
+    }
+
+    @GetMapping("/getDataSetRecordList")
+    public List<DataSetResp> getDataSetRecordList(@RequestParam("agentId") Integer agentId, HttpServletRequest request, HttpServletResponse response) {
+        User user = UserHolder.findUser(request, response);
+        return chatQueryService.getDataSetRecordList(agentId,  user);
     }
 }

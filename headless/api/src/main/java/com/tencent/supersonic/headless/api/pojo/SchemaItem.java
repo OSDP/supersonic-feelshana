@@ -25,6 +25,8 @@ public class SchemaItem extends RecordInfo {
 
     protected String description;
 
+    protected String llmDescription;
+
     protected Integer status;
 
     protected TypeEnums typeEnum;

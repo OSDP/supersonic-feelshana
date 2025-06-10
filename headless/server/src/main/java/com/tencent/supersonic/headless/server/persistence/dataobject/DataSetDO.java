@@ -22,6 +22,8 @@ public class DataSetDO {
 
     private String description;
 
+    private String llmDescription;
+
     private Integer status;
 
     private String alias;

@@ -1,7 +1,6 @@
 package com.tencent.supersonic.chat.server.parser;
 
 import com.google.common.collect.Lists;
-import com.hankcs.hanlp.HanLP;
 import com.tencent.supersonic.chat.api.pojo.response.ChatParseResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResp;
 import com.tencent.supersonic.chat.server.persistence.dataobject.ChatQueryDO;
@@ -18,27 +17,27 @@ import com.tencent.supersonic.common.service.impl.ExemplarServiceImpl;
 import com.tencent.supersonic.common.util.ChatAppManager;
 import com.tencent.supersonic.common.util.ContextUtils;
 import com.tencent.supersonic.common.util.JsonUtil;
+import com.tencent.supersonic.headless.api.pojo.MetaFilter;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementMatch;
 import com.tencent.supersonic.headless.api.pojo.SchemaElementType;
 import com.tencent.supersonic.headless.api.pojo.SemanticParseInfo;
 import com.tencent.supersonic.headless.api.pojo.enums.MapModeEnum;
 import com.tencent.supersonic.headless.api.pojo.request.QueryNLReq;
-import com.tencent.supersonic.headless.api.pojo.response.MapResp;
-import com.tencent.supersonic.headless.api.pojo.response.ParseResp;
-import com.tencent.supersonic.headless.api.pojo.response.QueryState;
+import com.tencent.supersonic.headless.api.pojo.response.*;
 import com.tencent.supersonic.headless.chat.parser.ParserConfig;
+import com.tencent.supersonic.headless.chat.parser.llm.OnePassSCSqlGenStrategy;
 import com.tencent.supersonic.headless.chat.service.RecommendedQuestionsService;
 import com.tencent.supersonic.headless.server.facade.service.ChatLayerService;
+import com.tencent.supersonic.headless.server.service.DataSetService;
 import com.tencent.supersonic.headless.server.utils.ModelConfigHelper;
 import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.Content;
-import dev.langchain4j.memory.ChatMemory;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.input.Prompt;
 import dev.langchain4j.model.input.PromptTemplate;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.provider.ModelProvider;
+import lombok.Setter;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -49,7 +48,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static com.tencent.supersonic.headless.chat.parser.ParserConfig.*;
-import static dev.langchain4j.data.message.UserMessage.userMessage;
 
 @Slf4j
 public class NL2SQLParser implements ChatQueryParser {
@@ -88,6 +86,7 @@ public class NL2SQLParser implements ChatQueryParser {
 
     @Override
     public void parse(ParseContext parseContext) {
+        long ruleStartTime = System.currentTimeMillis();
         // first go with rule-based parsers unless the user has already selected one parse.
         if (Objects.isNull(parseContext.getRequest().getSelectedParse())) {
             QueryNLReq queryNLReq = QueryReqConverter.buildQueryNLReq(parseContext);
@@ -95,10 +94,24 @@ public class NL2SQLParser implements ChatQueryParser {
             if (parseContext.enableLLM()) {
                 queryNLReq.setText2SQLType(Text2SQLType.NONE);
             }
-
+            Set<Long> requestedDatasets;
+            if (parseContext.getRequest().getDataSetId() != null) {
+                Long dataSetId = parseContext.getRequest().getDataSetId();
+                requestedDatasets = Collections.singleton(dataSetId);
+            }else {
+                // 新增：使用大模型选择最相关的数据集
+                requestedDatasets = selectRelevantDatasets(parseContext, queryNLReq);
+                if (CollectionUtils.isEmpty(requestedDatasets)) {
+                    parseContext.getResponse().setState(ParseResp.ParseState.FAILED);
+                    parseContext.getResponse().setErrorMsg("No relevant dataset found for the query");
+                    return;
+                }
+                log.info("LLM 择最相关的数据集 requestedDatasets:{}", requestedDatasets);
+            }
+            queryNLReq.setDataSetIds(requestedDatasets);
             // for every requested dataSet, recursively invoke rule-based parser with different
             // mapModes
-            Set<Long> requestedDatasets = queryNLReq.getDataSetIds();
+//            Set<Long> requestedDatasets = queryNLReq.getDataSetIds();
             List<SemanticParseInfo> candidateParses = Lists.newArrayList();
             StringBuilder errMsg = new StringBuilder();
             for (Long datasetId : requestedDatasets) {
@@ -142,7 +155,9 @@ public class NL2SQLParser implements ChatQueryParser {
                 parseContext.getResponse().setErrorMsg(errMsg.toString());
             }
         }
-
+        long costTime = System.currentTimeMillis() - ruleStartTime;
+        log.info("规则解析结束 cost time: {}ms", costTime);
+        long llmStartTime = System.currentTimeMillis();
         // next go with llm-based parsers unless LLM is disabled or use feedback is needed.
         if (parseContext.needLLMParse() && !parseContext.needFeedback()) {
             // either the user or the system selects one parse from the candidate parses.
@@ -157,14 +172,18 @@ public class NL2SQLParser implements ChatQueryParser {
                     : parseContext.getResponse().getSelectedParses().get(0));
             parseContext.setResponse(new ChatParseResp(parseContext.getResponse().getQueryId()));
 
+            long multiStartTime = System.currentTimeMillis();
             // // 1.多轮对话改写，未解析出来数据时重写
             rewriteMultiTurn(parseContext, queryNLReq);
-
+            log.info("多轮对话改写 cost time: {}ms", System.currentTimeMillis() - multiStartTime);
+            long exemplarsStartTime = System.currentTimeMillis();
             // // 2.fowShot召回，召唤记忆中启用的，RAG向量库中召回
             addDynamicExemplars(parseContext, queryNLReq);
+            log.info("fowShot召回 cost time: {}ms", System.currentTimeMillis() - exemplarsStartTime);
+            long doParseStartTime = System.currentTimeMillis();
             // // 3.调用Llm生成语义sql
             doParse(queryNLReq, parseContext.getResponse());
-
+            log.info("llm doParse cost time: {}ms", System.currentTimeMillis() - doParseStartTime);
             // try again with all semantic fields passed to LLM
             if (parseContext.getResponse().getState().equals(ParseResp.ParseState.FAILED)) {
                 queryNLReq.setSelectedParseInfo(null);
@@ -172,6 +191,7 @@ public class NL2SQLParser implements ChatQueryParser {
                 doParse(queryNLReq, parseContext.getResponse());
             }
         }
+        log.info("LLM解析结束 cost time: {}ms", System.currentTimeMillis() - llmStartTime);
     }
 
     private void doParse(QueryNLReq req, ChatParseResp resp) {
@@ -497,5 +517,108 @@ public class NL2SQLParser implements ChatQueryParser {
         public void setQueryResults(String queryResults) {
             this.queryResults = queryResults;
         }
+    }
+
+    // 新增方法：使用大模型选择最相关的数据集
+    private Set<Long> selectRelevantDatasets(ParseContext parseContext, QueryNLReq queryNLReq) {
+        Set<Long> dataSetIds = queryNLReq.getDataSetIds();
+        // 获取所有候选数据集及其描述信息
+        List<DatasetInfo> datasetInfos = getDatasetInfos(dataSetIds);
+        ChatApp chatApp = parseContext.getAgent().getChatAppConfig().get(OnePassSCSqlGenStrategy.APP_KEY);
+        // 构建大模型提示词
+        String promptTemplate = "请根据用户问题和数据集描述，选择最相关的数据集。\n"
+                + "用户问题: {{question}}\n"
+                + "候选数据集:\n{{datasets}}\n"
+                + "请只返回最相关数据集的ID，不要包含其他内容。";
+        //TODO 维度指标及描述信息
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("question", queryNLReq.getQueryText());
+        variables.put("datasets", buildDatasetDetailsPrompt(datasetInfos));
+
+        // 调用大模型
+        Prompt prompt = PromptTemplate.from(promptTemplate).apply(variables);
+        ChatLanguageModel model = ModelProvider.getChatModel(chatApp.getChatModelConfig());
+        Response<AiMessage> response = model.generate(prompt.toUserMessage());
+
+        // 解析返回结果
+        try {
+            Long selectedDatasetId = Long.parseLong(response.content().text().trim());
+            return Collections.singleton(selectedDatasetId);
+        } catch (NumberFormatException e) {
+            log.error("Failed to parse dataset selection result", e);
+            return dataSetIds;
+        }
+    }
+    private String buildDatasetDetailsPrompt(List<DatasetInfo> datasetInfos) {
+        StringBuilder prompt = new StringBuilder();
+        for (DatasetInfo dataset : datasetInfos) {
+            prompt.append(String.format("- 数据集ID: %d\n", dataset.getId()));
+            prompt.append(String.format("  描述: %s\n", dataset.getLlmDescription()));
+
+            // 添加维度信息
+            if (!CollectionUtils.isEmpty(dataset.getDimensions())) {
+                prompt.append("  维度:\n");
+                for (DimensionResp dim : dataset.getDimensions()) {
+                    prompt.append(String.format("    - 名称: %s", dim.getName()));
+                    if (StringUtils.isNotBlank(dim.getDescription())
+                            && !dim.getDescription().equals(dim.getName())) {
+                        prompt.append(String.format(", 描述: %s", dim.getDescription()));
+                    }
+                    prompt.append("\n");
+                }
+            }
+
+            // 添加指标信息
+            if (!CollectionUtils.isEmpty(dataset.getMetrics())) {
+                prompt.append("  指标:\n");
+                for (MetricResp metric : dataset.getMetrics()) {
+                    prompt.append(String.format("    - 名称: %s", metric.getName()));
+                    if (StringUtils.isNotBlank(metric.getDescription())
+                            && !metric.getDescription().equals(metric.getName())) {
+                        prompt.append(String.format(", 描述: %s", metric.getDescription()));
+                    }
+                    prompt.append("\n");
+                }
+            }
+            prompt.append("\n");
+        }
+        return prompt.toString();
+    }
+    // 新增内部类：数据集信息
+    @Getter
+    @Setter
+    private static class DatasetInfo {
+        private Long id;
+        private String llmDescription;
+        private List<DimensionResp> dimensions;
+        private List<MetricResp> metrics;
+    }
+    private List<DatasetInfo> getDatasetInfos(Set<Long> dataSetIds) {
+        DataSetService dataSetService = ContextUtils.getBean(DataSetService.class);
+        MetaFilter metaFilter = new MetaFilter();
+        metaFilter.setIds(new ArrayList<>(dataSetIds));
+        List<DataSetResp> dataSetList = dataSetService.getDataSetList(metaFilter);
+        // 获取数据集详细信息
+        List<DatasetInfo> datasetInfos = new ArrayList<>();
+        for (DataSetResp dataSetResp : dataSetList) {
+            try {
+                List<DimensionResp> dataSetDimensionRecord = dataSetService.getDataSetDimensionRecord(dataSetResp);
+                List<MetricResp> dataSetMetricRecord = dataSetService.getDataSetMetricRecord(dataSetResp);
+                DatasetInfo info = new DatasetInfo();
+                info.setId(dataSetResp.getId());
+                info.setLlmDescription(dataSetResp.getLlmDescription());
+                if (dataSetDimensionRecord != null){
+                    info.setDimensions(dataSetDimensionRecord);
+                }
+                if (dataSetMetricRecord != null){
+                    info.setMetrics(dataSetMetricRecord);
+                }
+                datasetInfos.add(info);
+            } catch (Exception e) {
+                log.error("Failed to get dataset info for id: {}", dataSetResp.getId(), e);
+            }
+        }
+
+        return datasetInfos;
     }
 }

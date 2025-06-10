@@ -132,7 +132,8 @@ public class DataSetServiceImpl extends ServiceImpl<DataSetDOMapper, DataSetDO>
         return getDataSetsByAuth(user, metaFilter);
     }
 
-    private List<DataSetResp> getDataSetsByAuth(User user, MetaFilter metaFilter) {
+    @Override
+    public List<DataSetResp> getDataSetsByAuth(User user, MetaFilter metaFilter) {
         List<DataSetResp> dataSetResps = getDataSetList(metaFilter);
         return getDataSetFilterByAuth(dataSetResps, user);
     }
@@ -267,6 +268,28 @@ public class DataSetServiceImpl extends ServiceImpl<DataSetDOMapper, DataSetDO>
                 throw new InvalidArgumentException("存在相同的指标名: " + duplicateMetricNames);
             }
         }
+    }
+    @Override
+    public List<DimensionResp> getDataSetDimensionRecord(DataSetResp dataSetResp) {
+        List<Long> allDimensionIds = dataSetResp.dimensionIds();
+        MetaFilter metaFilter = new MetaFilter();
+        if (!CollectionUtils.isEmpty(allDimensionIds)) {
+            metaFilter.setIds(allDimensionIds);
+            List<DimensionResp> dimensionResps = dimensionService.getDimensions(metaFilter);
+            return dimensionResps;
+        }
+        return Lists.newArrayList();
+    }
+    @Override
+    public List<MetricResp> getDataSetMetricRecord(DataSetResp dataSetResp) {
+        List<Long> allMetricIds = dataSetResp.metricIds();
+        MetaFilter metaFilter = new MetaFilter();
+        if (!CollectionUtils.isEmpty(allMetricIds)) {
+            metaFilter.setIds(allMetricIds);
+            List<MetricResp> metricResps = metricService.getMetrics(metaFilter);
+            return metricResps;
+        }
+        return Lists.newArrayList();
     }
 
     private <T, R> List<String> findDuplicates(List<T> list, Function<T, R> keyExtractor) {

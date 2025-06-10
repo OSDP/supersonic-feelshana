@@ -53,7 +53,9 @@ public class ChatWorkflowEngine {
         while (queryCtx.getChatWorkflowState() != ChatWorkflowState.FINISHED) {
             switch (queryCtx.getChatWorkflowState()) {
                 case MAPPING:
+                    long mappeStartTime = System.currentTimeMillis();
                     performMapping(queryCtx);
+                    log.info("performMapping cost time: {}ms", System.currentTimeMillis() - mappeStartTime);
                     if (queryCtx.getIsTip()) {
                         dimensionValuesMatchHelper.dimensionValuesStoreToCache(queryCtx);
                     }
@@ -74,7 +76,9 @@ public class ChatWorkflowEngine {
 
                     break;
                 case PARSING:
+                    long parseStartTime = System.currentTimeMillis();
                     performParsing(queryCtx);
+                    log.info("performParsing cost time: {}ms", System.currentTimeMillis() - parseStartTime);
                     if (queryCtx.getCandidateQueries().isEmpty()) {
                        errDefault(parseResult,queryCtx);
                     } else {
@@ -112,12 +116,15 @@ public class ChatWorkflowEngine {
 //                    }
                     break;
                 case S2SQL_CORRECTING:
+                    long correctStartTime = System.currentTimeMillis();
                     performCorrecting(queryCtx);
+                    log.info("performCorrecting cost time: {}ms", System.currentTimeMillis() - correctStartTime);
                     queryCtx.setChatWorkflowState(ChatWorkflowState.TRANSLATING);
                     break;
                 case TRANSLATING:
                     long start = System.currentTimeMillis();
                     performTranslating(queryCtx, parseResult);
+                    log.info("performTranslating cost time: {}ms", System.currentTimeMillis() - start);
                     parseResult.getParseTimeCost().setSqlTime(System.currentTimeMillis() - start);
                     queryCtx.setChatWorkflowState(ChatWorkflowState.FINISHED);
                     break;

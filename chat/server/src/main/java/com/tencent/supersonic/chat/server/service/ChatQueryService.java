@@ -7,6 +7,7 @@ import com.tencent.supersonic.chat.api.pojo.response.ChatParseResp;
 import com.tencent.supersonic.chat.api.pojo.response.QueryResult;
 import com.tencent.supersonic.common.pojo.User;
 import com.tencent.supersonic.headless.api.pojo.request.DimensionValueReq;
+import com.tencent.supersonic.headless.api.pojo.response.DataSetResp;
 import com.tencent.supersonic.headless.api.pojo.response.SearchResult;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -31,4 +32,6 @@ public interface ChatQueryService {
     QueryResult dataInterpret(ChatExecuteReq chatExecuteReq);
 
     SseEmitter streamParse(ChatParseReq chatParseReq);
+
+    List<DataSetResp> getDataSetRecordList(Integer agentId, User user);
 }
