@@ -25,6 +25,8 @@ public class AgentDO {
 
     private String examples;
 
+    private String examplesDataSetIds;
+
     private String createdBy;
 
     private Date createdAt;

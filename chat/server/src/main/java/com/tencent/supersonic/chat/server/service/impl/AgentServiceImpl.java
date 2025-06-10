@@ -167,6 +167,7 @@ public class AgentServiceImpl extends ServiceImpl<AgentDOMapper, AgentDO> implem
         BeanUtils.copyProperties(agentDO, agent);
         agent.setToolConfig(agentDO.getToolConfig());
         List<String> examples = JsonUtil.toList(agentDO.getExamples(), String.class);
+        List<Integer> examplesDataSetIds = JsonUtil.toList(agentDO.getExamplesDataSetIds(), Integer.class);
         LinkedList<String> examplesLinked = Lists.newLinkedList(examples);
         // NL2SQLParserConfig nl2SqlParserConfig = ContextUtils.getBean(NL2SQLParserConfig.class);
         // List<Integer> simpleModelAgentIds = nl2SqlParserConfig.getSimpleModelAgentIds();
@@ -176,6 +177,7 @@ public class AgentServiceImpl extends ServiceImpl<AgentDOMapper, AgentDO> implem
         // examplesLinked.addFirst("我能够查询的数据范围");
         // }
         agent.setExamples(examplesLinked);
+        agent.setExamplesDataSetIds(examplesDataSetIds);
         agent.setChatAppConfig(
                 JsonUtil.toMap(agentDO.getChatModelConfig(), String.class, ChatApp.class));
         agent.setVisualConfig(JsonUtil.toObject(agentDO.getVisualConfig(), VisualConfig.class));
@@ -200,6 +202,7 @@ public class AgentServiceImpl extends ServiceImpl<AgentDOMapper, AgentDO> implem
         BeanUtils.copyProperties(agent, agentDO);
         agentDO.setToolConfig(agent.getToolConfig());
         agentDO.setExamples(JsonUtil.toString(agent.getExamples()));
+        agentDO.setExamplesDataSetIds(JsonUtil.toString(agent.getExamplesDataSetIds()));
         agentDO.setChatModelConfig(JsonUtil.toString(agent.getChatAppConfig()));
         agentDO.setVisualConfig(JsonUtil.toString(agent.getVisualConfig()));
         agentDO.setAdmin(JsonUtil.toString(agent.getAdmins()));

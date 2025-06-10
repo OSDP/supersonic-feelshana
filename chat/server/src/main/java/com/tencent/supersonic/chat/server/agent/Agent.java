@@ -32,6 +32,7 @@ public class Agent extends RecordInfo {
     /** 0 offline, 1 online */
     private Integer status = ONLINE_STATUS;
     private List<String> examples;
+    private List<Integer> examplesDataSetIds;
     private Integer enableSearch = ENABLED;
     private Integer enableFeedback = DISABLED;
     private String toolConfig;

@@ -8,8 +8,6 @@ import com.tencent.supersonic.headless.chat.service.RecommendedQuestionsService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -31,9 +29,4 @@ public class RecommendedQuestionsServiceImpl
         return result != null ? result.getQuerySql() : null;
     }
 
-    public List<String> findQuestionByDataSetId(Long dataSetId) {
-        LambdaQueryWrapper<RecommendedQuestions> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(RecommendedQuestions::getDataSetId, dataSetId);
-        return this.list(wrapper).stream().map(RecommendedQuestions::getQuestion).collect(Collectors.toList());
-    }
 }

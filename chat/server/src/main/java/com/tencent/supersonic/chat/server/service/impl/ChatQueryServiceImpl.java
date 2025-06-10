@@ -1083,8 +1083,7 @@ public class ChatQueryServiceImpl implements ChatQueryService {
     public void deleteChatQuery(Long queryId) {
         chatManageService.deleteQuery(queryId);
     }
-    @Autowired
-    private RecommendedQuestionsService recommendedQuestionsService;
+
     @Override
     public List<DataSetResp> getDataSetRecordList(Integer agentId,  User user) {
         Agent agent = agentService.getAgent(agentId);
@@ -1093,10 +1092,27 @@ public class ChatQueryServiceImpl implements ChatQueryService {
         MetaFilter metaFilter = new MetaFilter();
         metaFilter.setIds(longs);
         List<DataSetResp> dataSetsByAuth = dataSetService.getDataSetsByAuth(user, metaFilter);
+
+        // 获取agent中的推荐问题和对应的数据集ID
+        List<String> examples = agent.getExamples();
+        List<Integer> examplesDataSetIds = agent.getExamplesDataSetIds();
+
+        // 创建数据集ID到推荐问题的映射
+        Map<Long, List<String>> dataSetQuestionsMap = new HashMap<>();
+        if (examples != null && examplesDataSetIds != null && examples.size() == examplesDataSetIds.size()) {
+            for (int i = 0; i < examples.size(); i++) {
+                Long dataSetId = examplesDataSetIds.get(i).longValue();
+                if (dataSetIds.contains(dataSetId)) {
+                    dataSetQuestionsMap.computeIfAbsent(dataSetId, k -> new ArrayList<>()).add(examples.get(i));
+                }
+            }
+        }
         for (DataSetResp dataSetResp : dataSetsByAuth) {
-            List<String> questions = recommendedQuestionsService.findQuestionByDataSetId(dataSetResp.getId());
             List<DimensionResp> dataSetDimensionRecord = dataSetService.getDataSetDimensionRecord(dataSetResp);
             List<MetricResp> dataSetMetricRecord = dataSetService.getDataSetMetricRecord(dataSetResp);
+
+            // 设置该数据集对应的推荐问题
+            List<String> questions = dataSetQuestionsMap.getOrDefault(dataSetResp.getId(), Collections.emptyList());
             dataSetResp.setExamples(questions);
             dataSetResp.setDataSetDimensionRecord(dataSetDimensionRecord);
             dataSetResp.setDataSetMetricRecord(dataSetMetricRecord);
