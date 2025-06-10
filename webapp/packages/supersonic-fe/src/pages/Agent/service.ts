@@ -81,3 +81,10 @@ export function createMemory(data: any) {
     data,
   });
 }
+
+export function getDataSetRecordList(data: {agentId: number | undefined}) {
+  return request<Result<string>>('/api/chat/query/getDataSetRecordList', {
+    method: 'GET',
+    data,
+  });
+}

@@ -12,6 +12,7 @@ import SelectTMEPerson from '@/components/SelectTMEPerson';
 import { getLlmModelAppList, getLlmList } from '../../services/system';
 import MemorySection from './MemorySection';
 import PermissionSection from './PermissionSection';
+import { getDataSetRecordList } from './service'
 
 const FormItem = Form.Item;
 const { TextArea } = Input;
@@ -52,6 +53,9 @@ const AgentForm: React.FC<Props> = ({ editAgent, onSaveAgent, onCreateToolBtnCli
 
   useEffect(() => {
     if (editAgent) {
+      getDataSetRecordList({agentId : editAgent.id}).then((res) => {
+        console.log(res, 'ressssssss')
+      });
       const config = jsonParse(editAgent.toolConfig, {});
       const initData = {
         ...editAgent,
