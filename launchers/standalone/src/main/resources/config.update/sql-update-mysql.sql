@@ -424,3 +424,6 @@ ALTER TABLE s2_user add column last_login datetime DEFAULT NULL;
 
 --20250414
 ALTER TABLE s2_agent add column `embed_url` varchar(1000) DEFAULT NULL COMMENT '嵌入模型url';
+
+--20250610
+ALTER TABLE s2_agent add column `examples_data_set_ids` text DEFAULT NULL COMMENT '示例问题对应数据集';

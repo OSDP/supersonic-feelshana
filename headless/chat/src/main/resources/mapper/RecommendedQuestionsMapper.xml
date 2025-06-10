@@ -7,7 +7,6 @@
     <resultMap id="BaseResultMap" type="com.tencent.supersonic.headless.chat.persistence.dataobject.RecommendedQuestions">
             <id property="id" column="id" />
             <result property="agentId" column="agent_id" />
-            <result property="dataSetId" column="data_set_id" />
             <result property="question" column="question" />
             <result property="querySql" column="query_sql" />
             <result property="status" column="status" />

@@ -23,10 +23,7 @@ public class RecommendedQuestions {
      * 助理ID
      */
     private Integer agentId;
-    /**
-     * 助理ID
-     */
-    private Integer dataSetId;
+
     /**
      * 推荐问题
      */
